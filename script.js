@@ -9,5 +9,38 @@
   var dogMinus=$('qdog-minus'),dogPlus=$('qdog-plus');if(dogMinus)dogMinus.addEventListener('click',function(){if(state.dogs>1){state.dogs--;$('qdog-count').textContent=state.dogs;updateEstimate()}});if(dogPlus)dogPlus.addEventListener('click',function(){if(state.dogs<6){state.dogs++;$('qdog-count').textContent=state.dogs;updateEstimate()}});
   var continueBtn=$('qcontinue-btn');if(continueBtn)continueBtn.addEventListener('click',function(){$('qform-zip').value=state.zip;$('qform-plan').value=state.plan==='weekly'?'Weekly':'Twice-weekly';$('qform-dogs').value=state.dogs;$('qform-estimate').value='$'+(state.plan==='weekly'?24:20)+'/visit, '+$('qest-month').textContent;showStep(3)});
   var backBtns=document.querySelectorAll('#quote .qback');for(var b=0;b<backBtns.length;b++){backBtns[b].addEventListener('click',function(){showStep(parseInt(this.getAttribute('data-back'),10))})}
-  var form=$('qstep-form');if(form){form.addEventListener('submit',function(e){e.preventDefault();var name=$('qname').value.trim();var phone=$('qphone').value.trim();var address=$('qaddress').value.trim();var notes=$('qnotes').value.trim();var msg='Hi! I would like a Newlywed Pooper Scoopers quote.%0A%0AName: '+encodeURIComponent(name)+'%0APhone: '+encodeURIComponent(phone)+'%0AAddress: '+encodeURIComponent(address)+'%0AZIP: '+encodeURIComponent(state.zip)+'%0APlan: '+encodeURIComponent(state.plan==='weekly'?'Weekly':'Twice-weekly')+'%0ADogs: '+state.dogs+'%0AEstimate: '+encodeURIComponent($('qform-estimate').value)+(notes?'%0ANotes: '+encodeURIComponent(notes):'');showStep(4);window.location.href='sms:16307306203?&body='+msg})}
+  var form=$('qstep-form');if(form){form.addEventListener('submit',async function(e){
+    e.preventDefault();
+    var submit=form.querySelector('button[type="submit"]');
+    var original=submit.textContent;
+    submit.disabled=true;
+    submit.textContent='Sending...';
+    var payload={
+      name:$('qname').value.trim(),
+      phone:$('qphone').value.trim(),
+      address:$('qaddress').value.trim(),
+      zip:state.zip,
+      plan:state.plan==='weekly'?'Weekly':'Twice-weekly',
+      dogs:state.dogs,
+      estimate:$('qform-estimate').value,
+      notes:$('qnotes').value.trim()
+    };
+    try{
+      var response=await fetch('/api/leads',{
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify(payload)
+      });
+      var data=await response.json().catch(function(){return {}});
+      if(!response.ok||!data.ok){throw new Error(data.error||'Unable to submit quote request.');}
+      var thanks=document.querySelector('#quote .qthanks');
+      if(thanks){thanks.innerHTML='<h3>You're on the list!</h3><p>We got your quote request and will text you shortly to confirm the details.</p>';}
+      showStep(4);
+      form.reset();
+    }catch(err){
+      alert((err&&err.message)||"We couldn't save your request. Please call or text us instead.");
+      submit.disabled=false;
+      submit.textContent=original;
+    }
+  })}
 })();
