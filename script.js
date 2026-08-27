@@ -33,11 +33,20 @@ document.addEventListener('DOMContentLoaded', function () {
     const msg = $('qzip-msg');
     if (msg) {
       msg.textContent = SOUTH_TAMPA_ZIPS.includes(zip)
-        ? `Good news — we're already picking up in ${zip}!`
-        : `We'll double check ${zip} is on our route — here's a quote either way:`;
+        ? `You're in our service area. Here's your instant quote for ${zip}:`
+        : `Here's your instant quote for ${zip}. We'll confirm the address is on our route before your first visit:`;
     }
     updateEstimate();
     showStep(2);
+  }
+
+  const startButton = $('qcontinue-btn');
+  if (startButton) startButton.textContent = 'Start service';
+
+  const form = $('qstep-form');
+  if (form) {
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.textContent = 'Sign me up';
   }
 
   $('qzip-btn')?.addEventListener('click', checkZip);
@@ -73,7 +82,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
-  $('qcontinue-btn')?.addEventListener('click', () => {
+  startButton?.addEventListener('click', () => {
     $('qform-zip').value = state.zip;
     $('qform-plan').value = state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly';
     $('qform-dogs').value = state.dogs;
@@ -87,14 +96,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  const form = $('qstep-form');
   if (form) {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const submit = form.querySelector('button[type="submit"]');
       const original = submit.textContent;
       submit.disabled = true;
-      submit.textContent = 'Sending...';
+      submit.textContent = 'Signing you up...';
 
       const payload = {
         name: $('qname').value.trim(),
@@ -114,14 +122,14 @@ document.addEventListener('DOMContentLoaded', function () {
           body: JSON.stringify(payload)
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to submit quote request.');
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to start service.');
 
         const thanks = document.querySelector('#quote .qthanks');
-        if (thanks) thanks.innerHTML = '<h3>You\'re on the list!</h3><p>We got your quote request and will text you shortly to confirm the details.</p>';
+        if (thanks) thanks.innerHTML = '<h3>You\'re signed up!</h3><p>We got your information and will text you shortly to confirm your service day and first cleanup.</p>';
         showStep(4);
         form.reset();
       } catch (err) {
-        alert(err?.message || "We couldn't save your request. Please call or text us instead.");
+        alert(err?.message || "We couldn't save your signup. Please call or text us instead.");
         submit.disabled = false;
         submit.textContent = original;
       }
