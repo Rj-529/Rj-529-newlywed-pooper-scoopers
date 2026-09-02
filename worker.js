@@ -10,6 +10,75 @@ function clean(value, max = 500) {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+async function sendEmail(env, message) {
+  if (!env.RESEND_API_KEY) throw new Error("Resend is not configured.");
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: "The Newlywed Pooper Scoopers <hello@thenewlywedco.com>",
+      reply_to: env.OWNER_EMAIL || undefined,
+      ...message
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Email delivery failed.");
+  return data;
+}
+
+function signupEmails(env, lead) {
+  const email = /^Email:\s*([^\s]+@[^\s]+)$/m.exec(lead.notes || "")?.[1] || "";
+  if (!email) return [];
+
+  const safe = {
+    name: escapeHtml(lead.name),
+    phone: escapeHtml(lead.phone),
+    email: escapeHtml(email),
+    address: escapeHtml(lead.address),
+    zip: escapeHtml(lead.zip),
+    plan: escapeHtml(lead.plan),
+    dogs: escapeHtml(lead.dogs),
+    estimate: escapeHtml(lead.estimate)
+  };
+  const firstCleanup = String(lead.plan).toLowerCase() === "weekly"
+    ? "Your first cleanup is free when you start a 4-week weekly plan."
+    : "";
+  const customerText = `Hi ${lead.name},\n\nYou're signed up with The Newlywed Pooper Scoopers. Your card is securely saved and you have not been charged today.\n\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\nService address: ${lead.address}, ${lead.zip}\n\n${firstCleanup} We'll text you shortly to confirm your service day. After service begins, your saved card will be charged at the quoted price after each completed visit. Service continues until paused or canceled.\n\nQuestions? Reply to this email or call/text (630) 730-6203.`;
+  const customerHtml = `<div style="background:#fbf3e7;padding:28px 16px;color:#241c18;font-family:Georgia,serif"><div style="max-width:580px;margin:auto;background:#fffefb;border:2px solid #241c18;border-radius:20px;overflow:hidden"><div style="background:#e9748f;padding:22px 26px"><h1 style="margin:0;font-size:25px">You're all set!</h1></div><div style="padding:26px"><p style="font-size:17px">Hi ${safe.name},</p><p>Your card is securely saved, and <strong>you have not been charged today.</strong></p><div style="background:#fbe3e7;border-radius:14px;padding:16px 18px;margin:20px 0"><p style="margin:0 0 7px"><strong>Plan:</strong> ${safe.plan}</p><p style="margin:0 0 7px"><strong>Dogs:</strong> ${safe.dogs}</p><p style="margin:0 0 7px"><strong>Price:</strong> ${safe.estimate}</p><p style="margin:0"><strong>Service address:</strong> ${safe.address}, ${safe.zip}</p></div>${firstCleanup ? `<p><strong>${escapeHtml(firstCleanup)}</strong></p>` : ""}<p>We'll text you shortly to confirm your service day. After service begins, your saved card will be charged at the quoted price after each completed visit. Service continues until paused or canceled.</p><p style="margin-top:24px">Questions? Reply to this email or call/text <strong>(630) 730-6203</strong>.</p><p style="margin:24px 0 0">Ryan &amp; the Newlywed Pooper Scoopers</p></div></div></div>`;
+
+  const messages = [sendEmail(env, {
+    to: [email],
+    subject: "You're signed up — The Newlywed Pooper Scoopers",
+    text: customerText,
+    html: customerHtml
+  })];
+
+  if (env.OWNER_EMAIL) {
+    const ownerText = `New customer signup\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${email}\nAddress: ${lead.address}, ${lead.zip}\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\n\nCard status: Saved and ready for future charges.`;
+    const ownerHtml = `<div style="font-family:Arial,sans-serif;max-width:600px"><h1>New customer signup</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p><p><strong>Plan:</strong> ${safe.plan}</p><p><strong>Dogs:</strong> ${safe.dogs}</p><p><strong>Price:</strong> ${safe.estimate}</p><p><strong>Card status:</strong> Saved and ready for future charges.</p></div>`;
+    messages.push(sendEmail(env, {
+      to: [env.OWNER_EMAIL],
+      subject: `New customer: ${lead.name}`,
+      text: ownerText,
+      html: ownerHtml
+    }));
+  }
+
+  return messages;
+}
+
 async function stripeRequest(env, path, params) {
   if (!env.STRIPE_SECRET_KEY) {
     throw new Error("Stripe is not configured yet.");
@@ -65,7 +134,7 @@ async function verifyStripeSignature(rawBody, signatureHeader, secret) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/quote-leads" && request.method === "POST") {
@@ -205,12 +274,27 @@ export default {
           const session = event.data.object;
           const leadId = Number.parseInt(session.metadata?.lead_id, 10);
           if (Number.isInteger(leadId)) {
-            await env.DB.prepare(
+            const lead = await env.DB.prepare(
+              `SELECT id, name, phone, address, zip, plan, dogs, estimate, notes, payment_status
+               FROM leads WHERE id = ?`
+            ).bind(leadId).first();
+            const update = await env.DB.prepare(
               `UPDATE leads
                SET stripe_customer_id = ?, stripe_checkout_session_id = ?, stripe_setup_intent_id = ?,
                    payment_status = 'card_on_file', status = 'customer'
-               WHERE id = ?`
+               WHERE id = ? AND payment_status != 'card_on_file'`
             ).bind(session.customer || null, session.id || null, session.setup_intent || null, leadId).run();
+
+            if (lead && Number(update.meta?.changes || 0) > 0) {
+              const deliveries = signupEmails(env, lead);
+              if (deliveries.length) {
+                ctx.waitUntil(Promise.allSettled(deliveries).then((results) => {
+                  results.forEach((result) => {
+                    if (result.status === "rejected") console.error("Signup email failed", result.reason);
+                  });
+                }));
+              }
+            }
           }
         }
 
