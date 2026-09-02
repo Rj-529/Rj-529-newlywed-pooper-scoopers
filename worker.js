@@ -68,19 +68,46 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/api/quote-leads" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const phone = clean(body.phone, 40);
+        const zip = clean(body.zip, 10);
+        const plan = clean(body.plan, 40);
+        const dogs = Number.parseInt(body.dogs, 10);
+        const estimate = clean(body.estimate, 120);
+
+        if (!body.consent || phone.replace(/\D/g, "").length < 10 || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
+          return json({ ok: false, error: "Please enter a valid mobile number and agree to receive texts." }, 400);
+        }
+
+        const result = await env.DB.prepare(
+          `INSERT INTO leads (name, phone, address, zip, plan, dogs, estimate, notes, source)
+           VALUES ('Quote request', ?, 'Not provided', ?, ?, ?, ?, 'Customer consented to quote follow-up by text.', 'quote_text_request')`
+        ).bind(phone, zip, plan, dogs, estimate).run();
+
+        return json({ ok: true, id: result.meta?.last_row_id ?? null }, 201);
+      } catch (error) {
+        console.error("Quote save failed", error);
+        return json({ ok: false, error: "We couldn't save your quote. Please text us instead." }, 500);
+      }
+    }
+
     if (url.pathname === "/api/leads" && request.method === "POST") {
       try {
         const body = await request.json();
         const name = clean(body.name, 120);
         const phone = clean(body.phone, 40);
+        const email = clean(body.email, 200);
         const address = clean(body.address, 200);
         const zip = clean(body.zip, 10);
         const plan = clean(body.plan, 40);
         const dogs = Number.parseInt(body.dogs, 10);
         const estimate = clean(body.estimate, 120);
-        const notes = clean(body.notes, 1000);
+        const customerNotes = clean(body.notes, 800);
+        const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}`, 1000);
 
-        if (!name || !phone || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
+        if (!name || !phone || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
           return json({ ok: false, error: "Please check the form and try again." }, 400);
         }
 

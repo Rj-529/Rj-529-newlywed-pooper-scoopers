@@ -18,6 +18,10 @@ document.addEventListener('DOMContentLoaded', function () {
       : '1 dog';
   }
 
+  function estimateText() {
+    return '$' + (state.plan === 'weekly' ? 24 : 20) + '/visit, ' + $('qest-month').textContent;
+  }
+
   function checkZip() {
     const input = $('qzip');
     const zip = (input?.value || '').trim();
@@ -86,8 +90,51 @@ document.addEventListener('DOMContentLoaded', function () {
     $('qform-zip').value = state.zip;
     $('qform-plan').value = state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly';
     $('qform-dogs').value = state.dogs;
-    $('qform-estimate').value = '$' + (state.plan === 'weekly' ? 24 : 20) + '/visit, ' + $('qest-month').textContent;
+    $('qform-estimate').value = estimateText();
     showStep(3);
+  });
+
+  const textForm = $('qtext-form');
+  textForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const phone = $('qtext-phone').value.trim();
+    const consent = $('qtext-consent').checked;
+    const status = $('qtext-status');
+    const button = textForm.querySelector('button[type="submit"]');
+
+    if (!consent) {
+      status.textContent = 'Please check the consent box so we can text you.';
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Saving...';
+    status.textContent = '';
+
+    try {
+      const response = await fetch('/api/quote-leads', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          phone,
+          zip: state.zip,
+          plan: state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly',
+          dogs: state.dogs,
+          estimate: estimateText(),
+          consent: true
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to save your quote.');
+
+      textForm.reset();
+      status.textContent = 'Quote saved — we’ll text you shortly.';
+      button.textContent = 'Saved';
+    } catch (err) {
+      status.textContent = err?.message || 'We could not save your quote. Please text us instead.';
+      button.disabled = false;
+      button.textContent = 'Text me';
+    }
   });
 
   document.querySelectorAll('#quote .qback').forEach((btn) => {
@@ -107,6 +154,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const payload = {
         name: $('qname').value.trim(),
         phone: $('qphone').value.trim(),
+        email: $('qemail').value.trim(),
         address: $('qaddress').value.trim(),
         zip: state.zip,
         plan: state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly',
