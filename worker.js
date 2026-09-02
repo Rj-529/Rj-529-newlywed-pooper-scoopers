@@ -136,7 +136,7 @@ export default {
         }
 
         const lead = await env.DB.prepare(
-          `SELECT id, name, phone, address, zip, plan, dogs, estimate,
+          `SELECT id, name, phone, address, zip, plan, dogs, estimate, notes,
                   stripe_customer_id, stripe_checkout_session_id
            FROM leads WHERE id = ?`
         ).bind(leadId).first();
@@ -145,9 +145,11 @@ export default {
 
         let customerId = lead.stripe_customer_id;
         if (!customerId) {
+          const customerEmail = /^Email:\s*([^\s]+@[^\s]+)$/m.exec(lead.notes || "")?.[1] || "";
           const customer = await stripeRequest(env, "/customers", {
             name: lead.name,
             phone: lead.phone,
+            email: customerEmail,
             "metadata[lead_id]": lead.id,
             "metadata[address]": lead.address,
             "metadata[zip]": lead.zip,

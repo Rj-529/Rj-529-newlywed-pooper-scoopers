@@ -36,6 +36,19 @@ document.addEventListener('DOMContentLoaded', function () {
     return '$' + (state.plan === 'weekly' ? 24 : 20) + '/visit, ' + $('qest-month').textContent;
   }
 
+  async function startCheckout(leadId) {
+    const response = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lead_id: leadId })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok || !data.checkout_url) {
+      throw new Error(data.error || 'Unable to open secure checkout.');
+    }
+    window.location.assign(data.checkout_url);
+  }
+
   function checkZip() {
     const input = $('qzip');
     const zip = (input?.value || '').trim();
@@ -163,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const submit = form.querySelector('button[type="submit"]');
       const original = submit.textContent;
       submit.disabled = true;
-      submit.textContent = 'Signing you up...';
+      submit.textContent = 'Saving your information...';
 
       const payload = {
         name: $('qname').value.trim(),
@@ -186,14 +199,38 @@ document.addEventListener('DOMContentLoaded', function () {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to start service.');
 
-        const thanks = document.querySelector('#quote .qthanks');
-        if (thanks) thanks.innerHTML = '<h3>You\'re signed up!</h3><p>We got your information and will text you shortly to confirm your service day and first cleanup.</p>';
-        showStep(4);
-        form.reset();
+        if (!data.id) throw new Error('Your information was saved, but checkout could not start. Please call or text us.');
+        submit.textContent = 'Opening secure checkout...';
+        await startCheckout(data.id);
       } catch (err) {
         alert(err?.message || "We couldn't save your signup. Please call or text us instead.");
         submit.disabled = false;
         submit.textContent = original;
+      }
+    });
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const paymentStatus = params.get('payment');
+  const returnedLeadId = Number.parseInt(params.get('lead'), 10);
+  const thanks = document.querySelector('#quote .qthanks');
+
+  if (paymentStatus === 'success' && thanks) {
+    thanks.innerHTML = '<h3>You\'re all set!</h3><p>Your card is securely saved. We\'ll text you shortly to confirm your service day and first cleanup.</p>';
+    showStep(4);
+  } else if (paymentStatus === 'cancelled' && thanks) {
+    thanks.innerHTML = '<h3>Your signup is saved.</h3><p>Your card wasn\'t added, so service isn\'t confirmed yet.</p><button class="btn btn-primary qretry" id="qretry-checkout" type="button">Return to secure checkout</button>';
+    showStep(4);
+    $('qretry-checkout')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = 'Opening checkout...';
+      try {
+        await startCheckout(returnedLeadId);
+      } catch (err) {
+        alert(err?.message || 'Unable to open checkout. Please call or text us.');
+        button.disabled = false;
+        button.textContent = 'Return to secure checkout';
       }
     });
   }
