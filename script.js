@@ -24,26 +24,28 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function updateEstimate() {
-    const rate = state.plan === 'weekly' ? 24 : 20;
+    const baseRate = state.plan === 'weekly' ? 24 : 20;
+    const visitsPerWeek = state.plan === 'weekly' ? 1 : 2;
     const extraDogs = state.dogs - 1;
-    $('qest-amount').innerHTML = '$' + rate + '<span class="qest-per">/visit</span>';
-    $('qest-month').textContent = extraDogs > 0
-      ? '+$' + (extraDogs * 4) + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's' : '')
-      : '1 dog';
+    const extraDogWeeklyTotal = extraDogs * 4;
+    const weeklyTotal = (baseRate * visitsPerWeek) + extraDogWeeklyTotal;
+    const perVisitTotal = weeklyTotal / visitsPerWeek;
+    $('qest-amount').innerHTML = '$' + perVisitTotal + '<span class="qest-per">/visit</span>';
+    $('qest-month').textContent = visitsPerWeek + ' visit' + (visitsPerWeek > 1 ? 's' : '') + '/week · $' + weeklyTotal + '/week total';
 
     const surcharge = extraDogs > 0
-      ? ' An additional $' + (extraDogs * 4) + '/week applies for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
+      ? ' This total includes $' + extraDogWeeklyTotal + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
       : '';
     const timing = state.plan === 'weekly'
-      ? 'Your first cleanup is free when you start a 4-week weekly plan. After that, your saved card will be charged $' + rate + ' after each completed weekly visit.'
-      : 'Your saved card will be charged $' + rate + ' after each completed twice-weekly visit.';
+      ? 'Your first cleanup is free when you start a 4-week weekly plan. After that, your saved card will be charged $' + perVisitTotal + ' after each completed weekly visit.'
+      : 'Your saved card will be charged $' + perVisitTotal + ' after each completed visit ($' + weeklyTotal + '/week total).';
     if ($('qpayment-terms')) {
       $('qpayment-terms').textContent = timing + surcharge + ' Service continues until you pause or cancel.';
     }
   }
 
   function estimateText() {
-    return '$' + (state.plan === 'weekly' ? 24 : 20) + '/visit, ' + $('qest-month').textContent;
+    return $('qest-amount').textContent + ', ' + $('qest-month').textContent;
   }
 
   async function startCheckout(leadId) {
