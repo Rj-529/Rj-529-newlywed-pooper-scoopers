@@ -234,4 +234,8 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
   }
+
+  if ((paymentStatus === 'success' || paymentStatus === 'cancelled') && thanks) {
+    requestAnimationFrame(() => $('quote')?.scrollIntoView({ block: 'start' }));
+  }
 });
