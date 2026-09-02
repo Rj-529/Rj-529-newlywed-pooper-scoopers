@@ -3,6 +3,20 @@ document.addEventListener('DOMContentLoaded', function () {
   const state = { zip: '', plan: 'weekly', dogs: 1 };
   const $ = (id) => document.getElementById(id);
 
+  function formatPhone(value) {
+    const digits = value.replace(/\D/g, '').slice(0, 10);
+    if (digits.length < 4) return digits ? '(' + digits : '';
+    if (digits.length < 7) return '(' + digits.slice(0, 3) + ') ' + digits.slice(3);
+    return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
+  }
+
+  ['qtext-phone', 'qphone'].forEach((id) => {
+    $(id)?.addEventListener('input', (event) => {
+      event.target.value = formatPhone(event.target.value);
+      event.target.setCustomValidity(event.target.value.replace(/\D/g, '').length === 10 ? '' : 'Enter a complete 10-digit phone number.');
+    });
+  });
+
   function showStep(n) {
     document.querySelectorAll('#quote .qstep').forEach((step) => {
       step.hidden = Number(step.dataset.step) !== n;

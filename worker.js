@@ -107,7 +107,7 @@ export default {
         const customerNotes = clean(body.notes, 800);
         const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}`, 1000);
 
-        if (!name || !phone || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
+        if (!name || phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
           return json({ ok: false, error: "Please check the form and try again." }, 400);
         }
 
