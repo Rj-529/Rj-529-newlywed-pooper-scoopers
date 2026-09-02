@@ -2,6 +2,7 @@
   "name": "rj-529-newlywed-pooper-scoopers",
   "main": "worker.js",
   "compatibility_date": "2026-08-26",
+  "keep_vars": true,
   "workers_dev": true,
   "preview_urls": true,
   "assets": {
