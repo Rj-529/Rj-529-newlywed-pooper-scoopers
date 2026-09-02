@@ -30,6 +30,16 @@ document.addEventListener('DOMContentLoaded', function () {
     $('qest-month').textContent = extraDogs > 0
       ? '+$' + (extraDogs * 4) + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's' : '')
       : '1 dog';
+
+    const surcharge = extraDogs > 0
+      ? ' An additional $' + (extraDogs * 4) + '/week applies for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
+      : '';
+    const timing = state.plan === 'weekly'
+      ? 'Your first cleanup is free when you start a 4-week weekly plan. After that, your saved card will be charged $' + rate + ' after each completed weekly visit.'
+      : 'Your saved card will be charged $' + rate + ' after each completed twice-weekly visit.';
+    if ($('qpayment-terms')) {
+      $('qpayment-terms').textContent = timing + surcharge + ' Service continues until you pause or cancel.';
+    }
   }
 
   function estimateText() {
@@ -187,7 +197,8 @@ document.addEventListener('DOMContentLoaded', function () {
         plan: state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly',
         dogs: state.dogs,
         estimate: $('qform-estimate').value,
-        notes: $('qnotes').value.trim()
+        notes: $('qnotes').value.trim(),
+        payment_authorized: $('qcharge-consent').checked
       };
 
       try {

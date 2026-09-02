@@ -105,10 +105,14 @@ export default {
         const dogs = Number.parseInt(body.dogs, 10);
         const estimate = clean(body.estimate, 120);
         const customerNotes = clean(body.notes, 800);
-        const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}`, 1000);
+        const paymentAuthorized = body.payment_authorized === true;
+        const authorizationRecord = paymentAuthorized
+          ? `Payment authorization: Accepted | Terms version: 2026-09-02 | Quote: ${estimate} | Plan: ${plan} | Accepted at: ${new Date().toISOString()}`
+          : "";
+        const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}${authorizationRecord ? `\n${authorizationRecord}` : ""}`, 1400);
 
-        if (!name || phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
-          return json({ ok: false, error: "Please check the form and try again." }, 400);
+        if (!name || phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate || !paymentAuthorized) {
+          return json({ ok: false, error: "Please check the form and accept the payment authorization." }, 400);
         }
 
         const result = await env.DB.prepare(
