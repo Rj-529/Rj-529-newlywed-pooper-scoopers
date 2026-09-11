@@ -1,6 +1,7 @@
+import { zipGate } from './zip-config.js';
+
 document.addEventListener('DOMContentLoaded', function () {
-  const SOUTH_TAMPA_ZIPS = ['33602','33606','33609','33611','33616','33621','33629'];
-  const state = { zip: '', plan: 'weekly', dogs: 1 };
+  const state = { zip: '', plan: 'weekly', dogs: 1, gate: '' };
   const $ = (id) => document.getElementById(id);
 
   function formatPhone(value) {
@@ -10,7 +11,7 @@ document.addEventListener('DOMContentLoaded', function () {
     return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
   }
 
-  ['qtext-phone', 'qphone'].forEach((id) => {
+  ['qtext-phone', 'qphone', 'qinterest-phone'].forEach((id) => {
     $(id)?.addEventListener('input', (event) => {
       event.target.value = formatPhone(event.target.value);
       event.target.setCustomValidity(event.target.value.replace(/\D/g, '').length === 10 ? '' : 'Enter a complete 10-digit phone number.');
@@ -73,11 +74,19 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     state.zip = zip;
+    state.gate = zipGate(zip);
+    if (state.gate !== 'service_now') {
+      $('qinterest-zip').value = zip;
+      $('qinterest-title').textContent = state.gate === 'border' ? 'One quick route check' : 'Join our waitlist';
+      $('qinterest-message').textContent = state.gate === 'border'
+        ? 'We’ll confirm you’re on our route before we say “I do.” No card needed.'
+        : 'We’re expanding around Tampa. Join the list and we’ll let you know when we’re ready to scoop.';
+      showStep(4);
+      return;
+    }
     const msg = $('qzip-msg');
     if (msg) {
-      msg.textContent = SOUTH_TAMPA_ZIPS.includes(zip)
-        ? `You're in our service area. Here's your instant quote for ${zip}:`
-        : `Here's your instant quote for ${zip}. We'll confirm the address is on our route before your first visit:`;
+      msg.textContent = `You're in our service area. Here's your instant quote for ${zip}:`;
     }
     updateEstimate();
     showStep(2);
@@ -182,6 +191,36 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  const interestForm = $('qinterest-form');
+  interestForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submit = interestForm.querySelector('button[type="submit"]');
+    const original = submit.textContent;
+    submit.disabled = true;
+    submit.textContent = 'Saving...';
+    try {
+      const response = await fetch('/api/interest', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: $('qinterest-name').value.trim(), phone: $('qinterest-phone').value.trim(),
+          email: $('qinterest-email').value.trim(), address: $('qinterest-address').value.trim(), zip: state.zip
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to save your request.');
+      const thanks = document.querySelector('#quote .qthanks');
+      thanks.innerHTML = state.gate === 'border'
+        ? '<h3>We’ve got you.</h3><p>We’ll confirm whether your address is on our route before we take the next step.</p>'
+        : '<h3>You’re on the list.</h3><p>We’re expanding around Tampa and will reach out when we’re ready to scoop your neighborhood.</p>';
+      showStep(5);
+    } catch (err) {
+      alert(err?.message || 'We could not save your request. Please call or text us instead.');
+      submit.disabled = false;
+      submit.textContent = original;
+    }
+  });
+
   if (form) {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -230,10 +269,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   if (paymentStatus === 'success' && thanks) {
     thanks.innerHTML = '<h3>You\'re all set!</h3><p>Your card is securely saved. We\'ll text you shortly to confirm your service day and first cleanup.</p>';
-    showStep(4);
+    showStep(5);
   } else if (paymentStatus === 'cancelled' && thanks) {
     thanks.innerHTML = '<h3>Your signup is saved.</h3><p>Your card wasn\'t added, so service isn\'t confirmed yet.</p><button class="btn btn-primary qretry" id="qretry-checkout" type="button">Return to secure checkout</button>';
-    showStep(4);
+    showStep(5);
     $('qretry-checkout')?.addEventListener('click', async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
