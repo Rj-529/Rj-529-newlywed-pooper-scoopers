@@ -37,10 +37,10 @@ document.addEventListener('DOMContentLoaded', function () {
       ? ' This total includes $' + extraDogWeeklyTotal + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
       : '';
     const timing = state.plan === 'weekly'
-      ? 'Your first cleanup is free when you start a 4-week weekly plan. After that, your saved card will be charged $' + perVisitTotal + ' after each completed weekly visit.'
-      : 'Your saved card will be charged $' + perVisitTotal + ' after each completed visit ($' + weeklyTotal + '/week total).';
+      ? 'Your saved card will be charged $' + weeklyTotal + ' once per week, after your weekly cleanup is completed.'
+      : 'Your saved card will be charged $' + weeklyTotal + ' once per week, after your second cleanup of the week is completed.';
     if ($('qpayment-terms')) {
-      $('qpayment-terms').textContent = timing + surcharge + ' Service continues until you pause or cancel.';
+      $('qpayment-terms').textContent = timing + surcharge + ' You will not be charged today. Service continues until you pause or cancel.';
     }
   }
 
