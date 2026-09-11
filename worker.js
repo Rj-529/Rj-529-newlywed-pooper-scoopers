@@ -1,3 +1,5 @@
+import { SERVICE_NOW_ZIPS, zipGate } from "./zip-config.js";
+
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: {
@@ -79,6 +81,27 @@ function signupEmails(env, lead) {
   return messages;
 }
 
+function interestEmails(env, lead, source) {
+  const isBorder = source === "border_check";
+  const safe = {
+    name: escapeHtml(lead.name), phone: escapeHtml(lead.phone), email: escapeHtml(lead.email),
+    address: escapeHtml(lead.address), zip: escapeHtml(lead.zip)
+  };
+  const customerText = isBorder
+    ? `Hi ${lead.name},\n\nThanks for reaching out to The Newlywed Pooper Scoopers. We’ll confirm whether ${lead.address}, ${lead.zip} is on our route before we take the next step. No card was requested.\n\n— Ryan & the Newlywed Pooper Scoopers`
+    : `Hi ${lead.name},\n\nYou’re on our list! We’re expanding around Tampa and will reach out when we’re ready to scoop your neighborhood.\n\n— Ryan & the Newlywed Pooper Scoopers`;
+  const customerHtml = `<p>Hi ${safe.name},</p><p>${isBorder ? `We’ll confirm whether <strong>${safe.address}, ${safe.zip}</strong> is on our route before we take the next step. No card was requested.` : "You’re on our list! We’re expanding around Tampa and will reach out when we’re ready to scoop your neighborhood."}</p><p>— Ryan &amp; the Newlywed Pooper Scoopers</p>`;
+  const messages = [sendEmail(env, { to: [lead.email], subject: isBorder ? "We’re checking your route" : "You’re on the Tampa waitlist", text: customerText, html: customerHtml })];
+  if (env.OWNER_EMAIL) {
+    messages.push(sendEmail(env, {
+      to: [env.OWNER_EMAIL], subject: `${isBorder ? "Route check" : "Waitlist"}: ${lead.name}`,
+      text: `${isBorder ? "Border route check" : "Waitlist signup"}\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${lead.email}\nAddress: ${lead.address}, ${lead.zip}`,
+      html: `<h1>${isBorder ? "Border route check" : "Waitlist signup"}</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p>`
+    }));
+  }
+  return messages;
+}
+
 async function stripeRequest(env, path, params) {
   if (!env.STRIPE_SECRET_KEY) {
     throw new Error("Stripe is not configured yet.");
@@ -146,6 +169,9 @@ export default {
         const dogs = Number.parseInt(body.dogs, 10);
         const estimate = clean(body.estimate, 120);
 
+        if (!SERVICE_NOW_ZIPS.includes(zip)) {
+          return json({ ok: false, error: "Instant quotes are available only in our current service area." }, 400);
+        }
         if (!body.consent || phone.replace(/\D/g, "").length < 10 || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate) {
           return json({ ok: false, error: "Please enter a valid mobile number and agree to receive texts." }, 400);
         }
@@ -180,6 +206,9 @@ export default {
           : "";
         const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}${authorizationRecord ? `\n${authorizationRecord}` : ""}`, 1400);
 
+        if (!SERVICE_NOW_ZIPS.includes(zip)) {
+          return json({ ok: false, error: "Online signup is available only in our current service area." }, 400);
+        }
         if (!name || phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(email) || !address || !/^\d{5}$/.test(zip) || !plan || !Number.isInteger(dogs) || dogs < 1 || dogs > 6 || !estimate || !paymentAuthorized) {
           return json({ ok: false, error: "Please check the form and accept the payment authorization." }, 400);
         }
@@ -196,12 +225,38 @@ export default {
       }
     }
 
+    if (url.pathname === "/api/interest" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const lead = {
+          name: clean(body.name, 120), phone: clean(body.phone, 40), email: clean(body.email, 200),
+          address: clean(body.address, 200), zip: clean(body.zip, 10)
+        };
+        const source = zipGate(lead.zip) === "border" ? "border_check" : "waitlist";
+        if (!lead.name || lead.phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(lead.email) || !lead.address || !/^\d{5}$/.test(lead.zip)) {
+          return json({ ok: false, error: "Please complete your contact information." }, 400);
+        }
+        await env.DB.prepare(
+          `INSERT INTO leads (name, phone, address, zip, plan, dogs, estimate, notes, source)
+           VALUES (?, ?, ?, ?, 'Not quoted', 0, 'Not quoted', ?, ?)`
+        ).bind(lead.name, lead.phone, lead.address, lead.zip, `Email: ${lead.email}`, source).run();
+        const deliveries = interestEmails(env, lead, source);
+        if (deliveries.length) {
+          ctx.waitUntil(Promise.allSettled(deliveries).then((results) => {
+            results.forEach((result) => {
+              if (result.status === "rejected") console.error("Interest email failed", result.reason);
+            });
+          }));
+        }
+        return json({ ok: true }, 201);
+      } catch (error) {
+        console.error("Interest submission failed", error);
+        return json({ ok: false, error: "We couldn't save your request. Please call or text us instead." }, 500);
+      }
+    }
+
     if (url.pathname === "/api/checkout" && request.method === "POST") {
       try {
-        if (!env.STRIPE_SECRET_KEY) {
-          return json({ ok: false, error: "Payments are not enabled yet." }, 503);
-        }
-
         const body = await request.json();
         const leadId = Number.parseInt(body.lead_id, 10);
         if (!Number.isInteger(leadId) || leadId < 1) {
@@ -215,6 +270,12 @@ export default {
         ).bind(leadId).first();
 
         if (!lead) return json({ ok: false, error: "Customer record not found." }, 404);
+        if (!SERVICE_NOW_ZIPS.includes(lead.zip)) {
+          return json({ ok: false, error: "Secure checkout is available only in our current service area." }, 400);
+        }
+        if (!env.STRIPE_SECRET_KEY) {
+          return json({ ok: false, error: "Payments are not enabled yet." }, 503);
+        }
 
         let customerId = lead.stripe_customer_id;
         if (!customerId) {
