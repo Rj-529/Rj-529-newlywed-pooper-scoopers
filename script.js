@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', function () {
       ? ' This total includes $' + extraDogWeeklyTotal + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
       : '';
     const timing = state.plan === 'twice'
-      ? 'Your saved card will be charged $' + perVisitTotal + ' after each twice-weekly visit ($' + periodTotal + '/week total).'
+      ? 'Your saved card will be charged $' + perVisitTotal + ' after each visit ($' + periodTotal + '/week total).'
       : state.plan === 'biweekly'
         ? 'Your saved card will be charged $' + perVisitTotal + ' after each every-other-week visit.'
         : 'Your saved card will be charged $' + perVisitTotal + ' after each weekly visit.';
