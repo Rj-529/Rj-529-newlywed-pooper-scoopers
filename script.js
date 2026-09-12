@@ -3,6 +3,11 @@ import { zipGate } from './zip-config.js';
 document.addEventListener('DOMContentLoaded', function () {
   const state = { zip: '', plan: 'weekly', dogs: 1, gate: '' };
   const $ = (id) => document.getElementById(id);
+  const planLabels = {
+    weekly: 'Weekly',
+    twice: 'Twice-weekly',
+    biweekly: 'Every other week'
+  };
 
   function formatPhone(value) {
     const digits = value.replace(/\D/g, '').slice(0, 10);
@@ -25,21 +30,35 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function updateEstimate() {
-    const baseRate = state.plan === 'weekly' ? 24 : 20;
-    const visitsPerWeek = state.plan === 'weekly' ? 1 : 2;
     const extraDogs = state.dogs - 1;
     const extraDogWeeklyTotal = extraDogs * 4;
-    const weeklyTotal = (baseRate * visitsPerWeek) + extraDogWeeklyTotal;
-    const perVisitTotal = weeklyTotal / visitsPerWeek;
+    let perVisitTotal;
+    let periodTotal;
+
+    if (state.plan === 'twice') {
+      periodTotal = 40 + extraDogWeeklyTotal;
+      perVisitTotal = periodTotal / 2;
+      $('qest-month').textContent = '2 visits/week · $' + periodTotal + '/week total';
+    } else if (state.plan === 'biweekly') {
+      periodTotal = 30 + (extraDogWeeklyTotal * 2);
+      perVisitTotal = periodTotal;
+      $('qest-month').textContent = '1 visit every other week · $' + periodTotal + ' every 2 weeks';
+    } else {
+      periodTotal = 24 + extraDogWeeklyTotal;
+      perVisitTotal = periodTotal;
+      $('qest-month').textContent = '1 visit/week · $' + periodTotal + '/week total';
+    }
+
     $('qest-amount').innerHTML = '$' + perVisitTotal + '<span class="qest-per">/visit</span>';
-    $('qest-month').textContent = visitsPerWeek + ' visit' + (visitsPerWeek > 1 ? 's' : '') + '/week · $' + weeklyTotal + '/week total';
 
     const surcharge = extraDogs > 0
       ? ' This total includes $' + extraDogWeeklyTotal + '/week for ' + extraDogs + ' extra dog' + (extraDogs > 1 ? 's.' : '.')
       : '';
-    const timing = state.plan === 'weekly'
-      ? 'Your saved card will be charged $' + weeklyTotal + ' once per week, after your weekly cleanup is completed.'
-      : 'Your saved card will be charged $' + weeklyTotal + ' once per week, after your second cleanup of the week is completed.';
+    const timing = state.plan === 'twice'
+      ? 'Your saved card will be charged $' + perVisitTotal + ' after each twice-weekly visit ($' + periodTotal + '/week total).'
+      : state.plan === 'biweekly'
+        ? 'Your saved card will be charged $' + perVisitTotal + ' after each every-other-week visit.'
+        : 'Your saved card will be charged $' + perVisitTotal + ' after each weekly visit.';
     if ($('qpayment-terms')) {
       $('qpayment-terms').textContent = timing + surcharge + ' You will not be charged today. Service continues until you pause or cancel.';
     }
@@ -136,7 +155,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   startButton?.addEventListener('click', () => {
     $('qform-zip').value = state.zip;
-    $('qform-plan').value = state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly';
+    $('qform-plan').value = planLabels[state.plan];
     $('qform-dogs').value = state.dogs;
     $('qform-estimate').value = estimateText();
     showStep(3);
@@ -166,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function () {
         body: JSON.stringify({
           phone,
           zip: state.zip,
-          plan: state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly',
+          plan: planLabels[state.plan],
           dogs: state.dogs,
           estimate: estimateText(),
           consent: true
@@ -235,7 +254,7 @@ document.addEventListener('DOMContentLoaded', function () {
         email: $('qemail').value.trim(),
         address: $('qaddress').value.trim(),
         zip: state.zip,
-        plan: state.plan === 'weekly' ? 'Weekly' : 'Twice-weekly',
+        plan: planLabels[state.plan],
         dogs: state.dogs,
         estimate: $('qform-estimate').value,
         notes: $('qnotes').value.trim(),

@@ -21,6 +21,22 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function billingTerms(lead, subject = "Your saved card") {
+  const plan = String(lead.plan).toLowerCase();
+  const perVisit = String(lead.estimate).match(/\$(\d+(?:\.\d{1,2})?)\/visit/i)?.[1];
+  const weeklyTotal = String(lead.estimate).match(/\$(\d+(?:\.\d{1,2})?)\/week total/i)?.[1];
+  const amount = perVisit ? `$${perVisit}` : "the quoted per-visit price";
+
+  if (plan.includes("twice")) {
+    const total = weeklyTotal ? ` ($${weeklyTotal}/week total)` : "";
+    return `${subject} will be charged ${amount} after each twice-weekly visit${total}.`;
+  }
+  if (plan.includes("every other") || plan.includes("biweekly")) {
+    return `${subject} will be charged ${amount} after each every-other-week visit.`;
+  }
+  return `${subject} will be charged ${amount} after each weekly visit.`;
+}
+
 async function sendEmail(env, message) {
   if (!env.RESEND_API_KEY) throw new Error("Resend is not configured.");
   const response = await fetch("https://api.resend.com/emails", {
@@ -54,9 +70,7 @@ function signupEmails(env, lead) {
     dogs: escapeHtml(lead.dogs),
     estimate: escapeHtml(lead.estimate)
   };
-  const billingTiming = String(lead.plan).toLowerCase().includes("twice")
-    ? "Your saved card will be charged once per week after your second scheduled cleanup of the week."
-    : "Your saved card will be charged once per week after your scheduled cleanup is completed.";
+  const billingTiming = billingTerms(lead);
   const customerText = `Hi ${lead.name},\n\nYou're signed up with The Newlywed Pooper Scoopers. Your card is securely saved and you have not been charged today.\n\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\nService address: ${lead.address}, ${lead.zip}\n\nWe'll text you shortly to confirm your service day. ${billingTiming} Service continues until paused or canceled.\n\nQuestions? Reply to this email or call/text (630) 730-6203.`;
   const customerHtml = `<div style="background:#fbf3e7;padding:28px 16px;color:#241c18;font-family:Georgia,serif"><div style="max-width:580px;margin:auto;background:#fffefb;border:2px solid #241c18;border-radius:20px;overflow:hidden"><div style="background:#e9748f;padding:22px 26px"><h1 style="margin:0;font-size:25px">You're all set!</h1></div><div style="padding:26px"><p style="font-size:17px">Hi ${safe.name},</p><p>Your card is securely saved, and <strong>you have not been charged today.</strong></p><div style="background:#fbe3e7;border-radius:14px;padding:16px 18px;margin:20px 0"><p style="margin:0 0 7px"><strong>Plan:</strong> ${safe.plan}</p><p style="margin:0 0 7px"><strong>Dogs:</strong> ${safe.dogs}</p><p style="margin:0 0 7px"><strong>Price:</strong> ${safe.estimate}</p><p style="margin:0"><strong>Service address:</strong> ${safe.address}, ${safe.zip}</p></div><p>We'll text you shortly to confirm your service day. ${escapeHtml(billingTiming)} Service continues until paused or canceled.</p><p style="margin-top:24px">Questions? Reply to this email or call/text <strong>(630) 730-6203</strong>.</p><p style="margin:24px 0 0">Ryan &amp; the Newlywed Pooper Scoopers</p></div></div></div>`;
 
@@ -202,7 +216,7 @@ export default {
         const customerNotes = clean(body.notes, 800);
         const paymentAuthorized = body.payment_authorized === true;
         const authorizationRecord = paymentAuthorized
-          ? `Payment authorization: Accepted | Terms version: 2026-09-11-weekly | Quote: ${estimate} | Plan: ${plan} | Accepted at: ${new Date().toISOString()}`
+          ? `Payment authorization: Accepted | Terms version: 2026-09-12-three-plans | Quote: ${estimate} | Plan: ${plan} | Accepted at: ${new Date().toISOString()}`
           : "";
         const notes = clean(`Email: ${email}${customerNotes ? `\n${customerNotes}` : ""}${authorizationRecord ? `\n${authorizationRecord}` : ""}`, 1400);
 
@@ -295,13 +309,8 @@ export default {
         }
 
         const origin = `${url.protocol}//${url.host}`;
-        const isTwiceWeekly = String(lead.plan).toLowerCase().includes("twice");
-        const weeklyMatch = String(lead.estimate).match(/\$(\d+(?:\.\d{1,2})?)\/week total/i);
-        const weeklyAmount = weeklyMatch ? `$${weeklyMatch[1]}/week` : String(lead.estimate);
-        const chargeTiming = isTwiceWeekly
-          ? "Your card will be charged once per week after your second scheduled cleanup of the week."
-          : "Your card will be charged once per week after your scheduled cleanup is completed.";
-        const stripeDisclosure = `${lead.plan} service: ${weeklyAmount}. You will not be charged today. ${chargeTiming} Service continues until you pause or cancel.`;
+        const chargeTiming = billingTerms(lead, "Your card");
+        const stripeDisclosure = `${lead.plan} service: ${lead.estimate}. You will not be charged today. ${chargeTiming} Service continues until you pause or cancel.`;
 
         const session = await stripeRequest(env, "/checkout/sessions", {
           mode: "setup",
