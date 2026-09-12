@@ -23,18 +23,34 @@ function escapeHtml(value) {
 
 function billingTerms(lead, subject = "Your saved card") {
   const plan = String(lead.plan).toLowerCase();
-  const perVisit = String(lead.estimate).match(/\$(\d+(?:\.\d{1,2})?)\/visit/i)?.[1];
-  const weeklyTotal = String(lead.estimate).match(/\$(\d+(?:\.\d{1,2})?)\/week total/i)?.[1];
-  const amount = perVisit ? `$${perVisit}` : "the quoted per-visit price";
+  const estimate = String(lead.estimate);
+  const dogs = Math.max(1, Number.parseInt(lead.dogs, 10) || 1);
+  const quotedPerVisit = estimate.match(/\$(\d+(?:\.\d{1,2})?)\/visit/i)?.[1];
+  const quotedWeeklyTotal = estimate.match(/\$(\d+(?:\.\d{1,2})?)\/week total/i)?.[1];
+
+  // The per-visit quote is the first-class amount for every plan. The dog-based
+  // fallbacks also keep older saved leads accurate if their estimate text lacks
+  // the newer /visit label.
+  const fallbackPerVisit = plan.includes("twice")
+    ? (40 + ((dogs - 1) * 4)) / 2
+    : plan.includes("every other") || plan.includes("biweekly")
+      ? 30 + ((dogs - 1) * 8)
+      : 24 + ((dogs - 1) * 4);
+  const perVisit = quotedPerVisit || String(fallbackPerVisit);
+  const amount = `$${perVisit}`;
 
   if (plan.includes("twice")) {
-    const total = weeklyTotal ? ` ($${weeklyTotal}/week total)` : "";
-    return `${subject} will be charged ${amount} after each twice-weekly visit${total}.`;
+    const weeklyTotal = quotedWeeklyTotal || String(Number(perVisit) * 2);
+    return `${subject} will be charged ${amount} after each visit ($${weeklyTotal}/week total).`;
   }
   if (plan.includes("every other") || plan.includes("biweekly")) {
     return `${subject} will be charged ${amount} after each every-other-week visit.`;
   }
   return `${subject} will be charged ${amount} after each weekly visit.`;
+}
+
+function billingDisclosure(lead, subject = "Your saved card") {
+  return `${billingTerms(lead, subject)} You will not be charged today. Service continues until you pause or cancel.`;
 }
 
 async function sendEmail(env, message) {
@@ -70,9 +86,9 @@ function signupEmails(env, lead) {
     dogs: escapeHtml(lead.dogs),
     estimate: escapeHtml(lead.estimate)
   };
-  const billingTiming = billingTerms(lead);
-  const customerText = `Hi ${lead.name},\n\nYou're signed up with The Newlywed Pooper Scoopers. Your card is securely saved and you have not been charged today.\n\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\nService address: ${lead.address}, ${lead.zip}\n\nWe'll text you shortly to confirm your service day. ${billingTiming} Service continues until paused or canceled.\n\nQuestions? Reply to this email or call/text (630) 730-6203.`;
-  const customerHtml = `<div style="background:#fbf3e7;padding:28px 16px;color:#241c18;font-family:Georgia,serif"><div style="max-width:580px;margin:auto;background:#fffefb;border:2px solid #241c18;border-radius:20px;overflow:hidden"><div style="background:#e9748f;padding:22px 26px"><h1 style="margin:0;font-size:25px">You're all set!</h1></div><div style="padding:26px"><p style="font-size:17px">Hi ${safe.name},</p><p>Your card is securely saved, and <strong>you have not been charged today.</strong></p><div style="background:#fbe3e7;border-radius:14px;padding:16px 18px;margin:20px 0"><p style="margin:0 0 7px"><strong>Plan:</strong> ${safe.plan}</p><p style="margin:0 0 7px"><strong>Dogs:</strong> ${safe.dogs}</p><p style="margin:0 0 7px"><strong>Price:</strong> ${safe.estimate}</p><p style="margin:0"><strong>Service address:</strong> ${safe.address}, ${safe.zip}</p></div><p>We'll text you shortly to confirm your service day. ${escapeHtml(billingTiming)} Service continues until paused or canceled.</p><p style="margin-top:24px">Questions? Reply to this email or call/text <strong>(630) 730-6203</strong>.</p><p style="margin:24px 0 0">Ryan &amp; the Newlywed Pooper Scoopers</p></div></div></div>`;
+  const billingTiming = billingDisclosure(lead);
+  const customerText = `Hi ${lead.name},\n\nYou're signed up with The Newlywed Pooper Scoopers. Your card is securely saved.\n\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\nService address: ${lead.address}, ${lead.zip}\n\nWe'll text you shortly to confirm your service day. ${billingTiming}\n\nQuestions? Reply to this email or call/text (630) 730-6203.`;
+  const customerHtml = `<div style="background:#fbf3e7;padding:28px 16px;color:#241c18;font-family:Georgia,serif"><div style="max-width:580px;margin:auto;background:#fffefb;border:2px solid #241c18;border-radius:20px;overflow:hidden"><div style="background:#e9748f;padding:22px 26px"><h1 style="margin:0;font-size:25px">You're all set!</h1></div><div style="padding:26px"><p style="font-size:17px">Hi ${safe.name},</p><p>Your card is securely saved.</p><div style="background:#fbe3e7;border-radius:14px;padding:16px 18px;margin:20px 0"><p style="margin:0 0 7px"><strong>Plan:</strong> ${safe.plan}</p><p style="margin:0 0 7px"><strong>Dogs:</strong> ${safe.dogs}</p><p style="margin:0 0 7px"><strong>Price:</strong> ${safe.estimate}</p><p style="margin:0"><strong>Service address:</strong> ${safe.address}, ${safe.zip}</p></div><p>We'll text you shortly to confirm your service day. ${escapeHtml(billingTiming)}</p><p style="margin-top:24px">Questions? Reply to this email or call/text <strong>(630) 730-6203</strong>.</p><p style="margin:24px 0 0">Ryan &amp; the Newlywed Pooper Scoopers</p></div></div></div>`;
 
   const messages = [sendEmail(env, {
     to: [email],
@@ -309,8 +325,7 @@ export default {
         }
 
         const origin = `${url.protocol}//${url.host}`;
-        const chargeTiming = billingTerms(lead, "Your card");
-        const stripeDisclosure = `${lead.plan} service: ${lead.estimate}. You will not be charged today. ${chargeTiming} Service continues until you pause or cancel.`;
+        const stripeDisclosure = `${lead.plan} service: ${lead.estimate}. ${billingDisclosure(lead, "Your card")}`;
 
         const session = await stripeRequest(env, "/checkout/sessions", {
           mode: "setup",
