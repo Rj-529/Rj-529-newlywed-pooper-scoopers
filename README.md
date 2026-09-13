@@ -1,37 +1,71 @@
-# Newlywed Pooper Scoopers — Squarespace Codebase
+# The Newlywed Pooper Scoopers
 
-This repository is the source of truth for the custom code used by the Newlywed Pooper Scoopers Squarespace site.
+This repository is the live website for [thenewlywedco.com](https://thenewlywedco.com): a Cloudflare Worker (`rj-529-newlywed-pooper-scoopers`) that serves the homepage and saves quote, signup, and waitlist requests into the D1 database `newlywed-leads`.
 
-## Structure
+The older `squarespace/` folder is leftover reference copy. The Worker files in the repo root are what the public site uses.
 
-- `squarespace/styles.css` — site styling loaded by Squarespace
-- `squarespace/quote.js` — quote-calculator behavior loaded by Squarespace
-- `squarespace/head-fonts.html` — Google Font tags used by the site
-- `squarespace/homepage.html` — reference copy of the homepage HTML when maintained here
+## Campaign links (how someone found us)
 
-## Recommended Squarespace setup
+Flyer and social links should land on the homepage with a short source tag. The site remembers that tag in the browser, then saves it on the lead in D1 as `leads.source` when they later request a quote, sign up, or join the waitlist.
 
-Use GitHub Pages to publish this repository, then reference the hosted CSS and JavaScript from Squarespace Code Injection. The page HTML can remain in a Squarespace Code Block while CSS and JavaScript are maintained here.
+| Printed or posted link | Source saved on the lead |
+| --- | --- |
+| `thenewlywedco.com/flyer` | `flyer_qr` |
+| `thenewlywedco.com/instagram` | `instagram` |
+| `thenewlywedco.com/facebook` | `facebook` |
+| `thenewlywedco.com/tiktok` | `tiktok` |
+| `thenewlywedco.com/?src=flyer_qr` (or `?utm_source=instagram`) | the matching allowlisted tag |
 
-### Header injection
+If there is no campaign tag, the lead keeps today’s usual source: `website` for signups, `quote_text_request` for “text me this quote,” `border_check` or `waitlist` for out-of-area interest.
 
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Titan+One&family=Fraunces:ital,wght@0,400;0,500;0,600;1,500;1,600&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="YOUR_GITHUB_PAGES_URL/squarespace/styles.css">
+The Worker also redirects `/flyer`, `/instagram`, `/facebook`, and `/tiktok` to `/?src=…`. **If Cloudflare Redirect Rules already send those paths to the homepage without `?src=`, update those rules** so they point at:
+
+- `/flyer` → `https://thenewlywedco.com/?src=flyer_qr`
+- `/instagram` → `https://thenewlywedco.com/?src=instagram`
+- `/facebook` → `https://thenewlywedco.com/?src=facebook`
+- `/tiktok` → `https://thenewlywedco.com/?src=tiktok`
+
+Otherwise the Worker never sees `/flyer` and the tag is lost.
+
+## Turnstile spam shield (dashboard setup)
+
+Forms that create a lead include Cloudflare Turnstile (managed mode). The Worker checks the token with Cloudflare before writing to D1.
+
+This environment cannot create the Turnstile widget for you. Do this once in the Cloudflare dashboard:
+
+1. Open [Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) and click **Add widget**.
+2. Name it something like `Newlywed website forms`.
+3. Hostnames: `thenewlywedco.com`, `www.thenewlywedco.com`, and `localhost` (so you can test on a laptop).
+4. Widget mode: **Managed**.
+5. Copy the **sitekey** and **secret key**.
+
+Then attach them to the Worker:
+
+```bash
+# Public sitekey — safe to store as a Worker variable
+npx wrangler vars put TURNSTILE_SITE_KEY
+# paste the sitekey when prompted
+
+# Secret — never commit this
+npx wrangler secret put TURNSTILE_SECRET_KEY
+# paste the secret when prompted
 ```
 
-### Footer injection
+Or in the dashboard: Worker `rj-529-newlywed-pooper-scoopers` → Settings → Variables and Secrets.
 
-```html
-<script src="YOUR_GITHUB_PAGES_URL/squarespace/quote.js"></script>
+Until the secret is set, the site keeps accepting forms (so a deploy does not lock the quote box). Once the secret is set, a missing or failed spam check is rejected with a plain “Please complete the spam check and try again.” message.
+
+Local testing can use Cloudflare’s dummy always-pass keys in a `.dev.vars` file that is not committed:
+
+```
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 ```
 
-## Important: quote form
+## Pricing and service area
 
-The current quote calculator UI works, but the form submission still needs to be connected to a real lead destination before launch. The existing behavior should not be treated as confirmed lead delivery until that backend is wired up.
+ZIP rules and prices live in `zip-config.js` and the quote widget. Do not change those unless you mean to change the business.
 
 ## Updating the site
 
-Once Squarespace references the GitHub Pages CSS and JS URLs, changes committed to those files can flow through to the live site without manually pasting the entire CSS or JavaScript again.
+Deploy the Worker as usual (`npx wrangler deploy`). Homepage HTML, CSS, and JavaScript are served as Worker static assets.

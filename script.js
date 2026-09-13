@@ -1,8 +1,102 @@
 import { zipGate } from './zip-config.js';
+import {
+  SOURCE_STORAGE_KEY,
+  normalizeMarketingSource,
+  readSourceCookie,
+  resolveRequestMarketingSource,
+  sourceCookieHeader
+} from './lead-source.js';
+
+const TURNSTILE_PLACEHOLDER = 'TURNSTILE_SITE_KEY_PLACEHOLDER';
+
+function persistMarketingSource(source) {
+  const value = normalizeMarketingSource(source);
+  if (!value) return;
+  try { sessionStorage.setItem(SOURCE_STORAGE_KEY, value); } catch {}
+  try { localStorage.setItem(SOURCE_STORAGE_KEY, value); } catch {}
+  document.cookie = sourceCookieHeader(value, { secure: window.location.protocol === 'https:' });
+}
+
+function capturedMarketingSource() {
+  const incoming = resolveRequestMarketingSource(new URL(window.location.href));
+  if (incoming) persistMarketingSource(incoming);
+  try {
+    const fromSession = normalizeMarketingSource(sessionStorage.getItem(SOURCE_STORAGE_KEY));
+    if (fromSession) return fromSession;
+  } catch {}
+  try {
+    const fromLocal = normalizeMarketingSource(localStorage.getItem(SOURCE_STORAGE_KEY));
+    if (fromLocal) return fromLocal;
+  } catch {}
+  return readSourceCookie(document.cookie);
+}
+
+function turnstileSiteKey() {
+  const fromMeta = document.querySelector('meta[name="turnstile-sitekey"]')?.getAttribute('content')?.trim();
+  if (fromMeta && fromMeta !== TURNSTILE_PLACEHOLDER) return fromMeta;
+  return '';
+}
+
+function whenTurnstileReady(callback) {
+  if (window.turnstile?.render) {
+    callback();
+    return;
+  }
+  const started = Date.now();
+  const timer = setInterval(() => {
+    if (window.turnstile?.render || Date.now() - started > 8000) {
+      clearInterval(timer);
+      if (window.turnstile?.render) callback();
+    }
+  }, 50);
+}
 
 document.addEventListener('DOMContentLoaded', function () {
   const state = { zip: '', plan: 'weekly', dogs: 1, gate: '' };
+  const marketingSource = capturedMarketingSource();
+  const turnstileWidgets = {};
   const $ = (id) => document.getElementById(id);
+
+  function renderTurnstile(step) {
+    const sitekey = turnstileSiteKey();
+    const containers = { 2: 'qtext-turnstile', 3: 'qsignup-turnstile', 4: 'qinterest-turnstile' };
+    const el = $(containers[step]);
+    if (!sitekey || !el) return;
+    whenTurnstileReady(() => {
+      if (turnstileWidgets[step]) {
+        window.turnstile.reset(turnstileWidgets[step]);
+        return;
+      }
+      turnstileWidgets[step] = window.turnstile.render(el, {
+        sitekey,
+        theme: 'auto',
+        size: 'flexible',
+        appearance: 'always',
+        'refresh-expired': 'auto'
+      });
+    });
+  }
+
+  function turnstileToken(step) {
+    const sitekey = turnstileSiteKey();
+    if (!sitekey) return '';
+    const widgetId = turnstileWidgets[step];
+    const token = widgetId && window.turnstile ? window.turnstile.getResponse(widgetId) : '';
+    if (!token) throw new Error('Please complete the spam check and try again.');
+    return token;
+  }
+
+  function resetTurnstile(step) {
+    const widgetId = turnstileWidgets[step];
+    if (widgetId && window.turnstile) window.turnstile.reset(widgetId);
+  }
+
+  function attributionFields(step) {
+    return {
+      source: marketingSource || undefined,
+      turnstile_token: turnstileToken(step)
+    };
+  }
   const planLabels = {
     weekly: 'Weekly',
     twice: 'Twice-weekly',
@@ -27,6 +121,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('#quote .qstep').forEach((step) => {
       step.hidden = Number(step.dataset.step) !== n;
     });
+    if (n === 2 || n === 3 || n === 4) renderTurnstile(n);
   }
 
   function updateEstimate() {
@@ -188,7 +283,8 @@ document.addEventListener('DOMContentLoaded', function () {
           plan: planLabels[state.plan],
           dogs: state.dogs,
           estimate: estimateText(),
-          consent: true
+          consent: true,
+          ...attributionFields(2)
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -198,6 +294,7 @@ document.addEventListener('DOMContentLoaded', function () {
       status.textContent = 'Quote saved — we’ll text you shortly.';
       button.textContent = 'Saved';
     } catch (err) {
+      resetTurnstile(2);
       status.textContent = err?.message || 'We could not save your quote. Please text us instead.';
       button.disabled = false;
       button.textContent = 'Text me';
@@ -223,7 +320,8 @@ document.addEventListener('DOMContentLoaded', function () {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: $('qinterest-name').value.trim(), phone: $('qinterest-phone').value.trim(),
-          email: $('qinterest-email').value.trim(), address: $('qinterest-address').value.trim(), zip: state.zip
+          email: $('qinterest-email').value.trim(), address: $('qinterest-address').value.trim(), zip: state.zip,
+          ...attributionFields(4)
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -234,6 +332,7 @@ document.addEventListener('DOMContentLoaded', function () {
         : '<h3>You’re on the list.</h3><p>We’re expanding around Tampa and will reach out when we’re ready to scoop your neighborhood.</p>';
       showStep(5);
     } catch (err) {
+      resetTurnstile(4);
       alert(err?.message || 'We could not save your request. Please call or text us instead.');
       submit.disabled = false;
       submit.textContent = original;
@@ -258,7 +357,8 @@ document.addEventListener('DOMContentLoaded', function () {
         dogs: state.dogs,
         estimate: $('qform-estimate').value,
         notes: $('qnotes').value.trim(),
-        payment_authorized: $('qcharge-consent').checked
+        payment_authorized: $('qcharge-consent').checked,
+        ...attributionFields(3)
       };
 
       try {
@@ -274,6 +374,7 @@ document.addEventListener('DOMContentLoaded', function () {
         submit.textContent = 'Opening secure checkout...';
         await startCheckout(data.id);
       } catch (err) {
+        resetTurnstile(3);
         alert(err?.message || "We couldn't save your signup. Please call or text us instead.");
         submit.disabled = false;
         submit.textContent = original;
