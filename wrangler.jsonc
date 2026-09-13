@@ -3,6 +3,11 @@
   "main": "worker.js",
   "compatibility_date": "2026-08-26",
   "keep_vars": true,
+  // Public Turnstile sitekey. Leave blank until the widget is created in the
+  // Cloudflare dashboard, then set this var (never put the secret here).
+  "vars": {
+    "TURNSTILE_SITE_KEY": ""
+  },
   "workers_dev": true,
   "preview_urls": true,
   "assets": {

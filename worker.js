@@ -1,4 +1,12 @@
 import { SERVICE_NOW_ZIPS, zipGate } from "./zip-config.js";
+import {
+  campaignSourceFromPath,
+  leadSource,
+  normalizeMarketingSource,
+  readSourceCookie,
+  resolveRequestMarketingSource,
+  sourceCookieHeader
+} from "./lead-source.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -10,6 +18,55 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 function clean(value, max = 500) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function requestedMarketingSource(body, request) {
+  const fromBody = normalizeMarketingSource(body?.source);
+  if (fromBody) return fromBody;
+  const url = new URL(request.url);
+  return resolveRequestMarketingSource(url) || readSourceCookie(request.headers.get("Cookie"));
+}
+
+function withMarketingNote(notes, marketing) {
+  if (!marketing) return notes;
+  const prefix = notes ? `${notes}\n` : "";
+  return `${prefix}Marketing: ${marketing}`;
+}
+
+const TURNSTILE_FAILED = "Please complete the spam check and try again.";
+
+async function verifyTurnstile(env, request, body) {
+  const secret = env.TURNSTILE_SECRET_KEY;
+  if (!secret) {
+    console.warn("TURNSTILE_SECRET_KEY is not set; form spam check is skipped.");
+    return { ok: true };
+  }
+
+  const token = clean(body?.turnstile_token || body?.["cf-turnstile-response"], 2048);
+  if (!token) {
+    return { ok: false, error: TURNSTILE_FAILED };
+  }
+
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        secret,
+        response: token,
+        remoteip: request.headers.get("CF-Connecting-IP") || undefined
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!result.success) {
+      console.warn("Turnstile rejected", result["error-codes"] || []);
+      return { ok: false, error: TURNSTILE_FAILED };
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error("Turnstile siteverify failed", error);
+    return { ok: false, error: "We couldn't complete the spam check. Please try again." };
+  }
 }
 
 function escapeHtml(value) {
@@ -98,8 +155,10 @@ function signupEmails(env, lead) {
   })];
 
   if (env.OWNER_EMAIL) {
-    const ownerText = `New customer signup\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${email}\nAddress: ${lead.address}, ${lead.zip}\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}\n\nCard status: Saved and ready for future charges.`;
-    const ownerHtml = `<div style="font-family:Arial,sans-serif;max-width:600px"><h1>New customer signup</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p><p><strong>Plan:</strong> ${safe.plan}</p><p><strong>Dogs:</strong> ${safe.dogs}</p><p><strong>Price:</strong> ${safe.estimate}</p><p><strong>Card status:</strong> Saved and ready for future charges.</p></div>`;
+    const foundUs = lead.source && lead.source !== "website" ? `\nHow they found us: ${lead.source}` : "";
+    const foundUsHtml = lead.source && lead.source !== "website" ? `<p><strong>How they found us:</strong> ${escapeHtml(lead.source)}</p>` : "";
+    const ownerText = `New customer signup\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${email}\nAddress: ${lead.address}, ${lead.zip}\nPlan: ${lead.plan}\nDogs: ${lead.dogs}\nPrice: ${lead.estimate}${foundUs}\n\nCard status: Saved and ready for future charges.`;
+    const ownerHtml = `<div style="font-family:Arial,sans-serif;max-width:600px"><h1>New customer signup</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p><p><strong>Plan:</strong> ${safe.plan}</p><p><strong>Dogs:</strong> ${safe.dogs}</p><p><strong>Price:</strong> ${safe.estimate}</p>${foundUsHtml}<p><strong>Card status:</strong> Saved and ready for future charges.</p></div>`;
     messages.push(sendEmail(env, {
       to: [env.OWNER_EMAIL],
       subject: `New customer: ${lead.name}`,
@@ -111,7 +170,7 @@ function signupEmails(env, lead) {
   return messages;
 }
 
-function interestEmails(env, lead, source) {
+function interestEmails(env, lead, source, marketing) {
   const isBorder = source === "border_check";
   const safe = {
     name: escapeHtml(lead.name), phone: escapeHtml(lead.phone), email: escapeHtml(lead.email),
@@ -125,8 +184,8 @@ function interestEmails(env, lead, source) {
   if (env.OWNER_EMAIL) {
     messages.push(sendEmail(env, {
       to: [env.OWNER_EMAIL], subject: `${isBorder ? "Route check" : "Waitlist"}: ${lead.name}`,
-      text: `${isBorder ? "Border route check" : "Waitlist signup"}\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${lead.email}\nAddress: ${lead.address}, ${lead.zip}`,
-      html: `<h1>${isBorder ? "Border route check" : "Waitlist signup"}</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p>`
+      text: `${isBorder ? "Border route check" : "Waitlist signup"}\n\nName: ${lead.name}\nPhone: ${lead.phone}\nEmail: ${lead.email}\nAddress: ${lead.address}, ${lead.zip}${marketing ? `\nHow they found us: ${marketing}` : ""}`,
+      html: `<h1>${isBorder ? "Border route check" : "Waitlist signup"}</h1><p><strong>Name:</strong> ${safe.name}</p><p><strong>Phone:</strong> ${safe.phone}</p><p><strong>Email:</strong> ${safe.email}</p><p><strong>Address:</strong> ${safe.address}, ${safe.zip}</p>${marketing ? `<p><strong>How they found us:</strong> ${escapeHtml(marketing)}</p>` : ""}`
     }));
   }
   return messages;
@@ -206,10 +265,17 @@ export default {
           return json({ ok: false, error: "Please enter a valid mobile number and agree to receive texts." }, 400);
         }
 
+        const challenge = await verifyTurnstile(env, request, body);
+        if (!challenge.ok) return json({ ok: false, error: challenge.error }, 400);
+
+        const marketing = requestedMarketingSource(body, request);
+        const source = leadSource(marketing, "quote_text_request");
+        const notes = withMarketingNote("Customer consented to quote follow-up by text.", marketing);
+
         const result = await env.DB.prepare(
           `INSERT INTO leads (name, phone, address, zip, plan, dogs, estimate, notes, source)
-           VALUES ('Quote request', ?, 'Not provided', ?, ?, ?, ?, 'Customer consented to quote follow-up by text.', 'quote_text_request')`
-        ).bind(phone, zip, plan, dogs, estimate).run();
+           VALUES ('Quote request', ?, 'Not provided', ?, ?, ?, ?, ?, ?)`
+        ).bind(phone, zip, plan, dogs, estimate, notes, source).run();
 
         return json({ ok: true, id: result.meta?.last_row_id ?? null }, 201);
       } catch (error) {
@@ -243,10 +309,17 @@ export default {
           return json({ ok: false, error: "Please check the form and accept the payment authorization." }, 400);
         }
 
+        const challenge = await verifyTurnstile(env, request, body);
+        if (!challenge.ok) return json({ ok: false, error: challenge.error }, 400);
+
+        const marketing = requestedMarketingSource(body, request);
+        const source = leadSource(marketing, "website");
+        const savedNotes = clean(withMarketingNote(notes, marketing), 1400);
+
         const result = await env.DB.prepare(
           `INSERT INTO leads (name, phone, address, zip, plan, dogs, estimate, notes, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'website')`
-        ).bind(name, phone, address, zip, plan, dogs, estimate, notes || null).run();
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(name, phone, address, zip, plan, dogs, estimate, savedNotes || null, source).run();
 
         return json({ ok: true, id: result.meta?.last_row_id ?? null }, 201);
       } catch (error) {
@@ -262,15 +335,23 @@ export default {
           name: clean(body.name, 120), phone: clean(body.phone, 40), email: clean(body.email, 200),
           address: clean(body.address, 200), zip: clean(body.zip, 10)
         };
-        const source = zipGate(lead.zip) === "border" ? "border_check" : "waitlist";
+        const formSource = zipGate(lead.zip) === "border" ? "border_check" : "waitlist";
         if (!lead.name || lead.phone.replace(/\D/g, "").length !== 10 || !/^\S+@\S+\.\S+$/.test(lead.email) || !lead.address || !/^\d{5}$/.test(lead.zip)) {
           return json({ ok: false, error: "Please complete your contact information." }, 400);
         }
+
+        const challenge = await verifyTurnstile(env, request, body);
+        if (!challenge.ok) return json({ ok: false, error: challenge.error }, 400);
+
+        const marketing = requestedMarketingSource(body, request);
+        const source = leadSource(marketing, formSource);
+        const notes = withMarketingNote(`Email: ${lead.email}`, marketing);
+
         await env.DB.prepare(
           `INSERT INTO leads (name, phone, address, zip, plan, dogs, estimate, notes, source)
            VALUES (?, ?, ?, ?, 'Not quoted', 0, 'Not quoted', ?, ?)`
-        ).bind(lead.name, lead.phone, lead.address, lead.zip, `Email: ${lead.email}`, source).run();
-        const deliveries = interestEmails(env, lead, source);
+        ).bind(lead.name, lead.phone, lead.address, lead.zip, notes, source).run();
+        const deliveries = interestEmails(env, lead, formSource, marketing);
         if (deliveries.length) {
           ctx.waitUntil(Promise.allSettled(deliveries).then((results) => {
             results.forEach((result) => {
@@ -373,7 +454,7 @@ export default {
           const leadId = Number.parseInt(session.metadata?.lead_id, 10);
           if (Number.isInteger(leadId)) {
             const lead = await env.DB.prepare(
-              `SELECT id, name, phone, address, zip, plan, dogs, estimate, notes, payment_status
+              `SELECT id, name, phone, address, zip, plan, dogs, estimate, notes, source, payment_status
                FROM leads WHERE id = ?`
             ).bind(leadId).first();
             const update = await env.DB.prepare(
@@ -403,10 +484,44 @@ export default {
       }
     }
 
+    if (url.pathname === "/api/public-config" && request.method === "GET") {
+      return json({
+        ok: true,
+        turnstileSiteKey: env.TURNSTILE_SITE_KEY || ""
+      });
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return json({ ok: false, error: "Not found" }, 404);
     }
 
-    return env.ASSETS.fetch(request);
+    if (request.method === "GET") {
+      const campaign = campaignSourceFromPath(url.pathname);
+      if (campaign) {
+        const dest = new URL("/", url);
+        dest.searchParams.set("src", campaign);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: `${dest.pathname}${dest.search}`,
+            "Set-Cookie": sourceCookieHeader(campaign, { secure: url.protocol === "https:" }),
+            "cache-control": "no-store"
+          }
+        });
+      }
+    }
+
+    const asset = await env.ASSETS.fetch(request);
+    const contentType = asset.headers.get("content-type") || "";
+    if (request.method === "GET" && contentType.includes("text/html")) {
+      const html = await asset.text();
+      const rewritten = html.replaceAll("TURNSTILE_SITE_KEY_PLACEHOLDER", env.TURNSTILE_SITE_KEY || "");
+      const headers = new Headers(asset.headers);
+      headers.delete("content-length");
+      headers.set("cache-control", "no-store");
+      return new Response(rewritten, { status: asset.status, headers });
+    }
+
+    return asset;
   }
 };
